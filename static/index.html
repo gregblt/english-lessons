@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>English lessons</title>
+    <link href="https://fonts.googleapis.com/css?family=Montserrat:100,200,300" rel="stylesheet">
+    <link rel="stylesheet" media="only screen" type="text/css" href="static/style.css">
+    <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.4.js"></script>
+    <meta charset="utf-8" />
+  </head>
+  <body >
+    <p>English lessons</p>
+
+    <pre id="content"></pre>
+
+    <div id="loader" class="loader" style="display: none;"></div>
+
+    <!--Add buttons to initiate auth sequence and sign out-->
+    <button id="authorize_button" style="display: none;">Authorize</button>
+    <button id="signout_button" style="display: none;">Sign Out</button>
+    <button id="create_button" onclick="updateDocs()" style="display: none;">Update Docs</button>
+    <button id="update_button" onclick="checkUpdates()" style="display: none;">Check for updates</button>
+
+    <script type="text/javascript">
+      // Client ID and API key from the Developer Console
+      var CLIENT_ID = '369825281267-t6bc1e1oj6eqmjfgcse714c1a6p7s82b.apps.googleusercontent.com';
+      var API_KEY = 'AIzaSyBNCEnbAlD6omTgw-F7nwc9p_KRvlNPQV4';
+
+	$.ajaxSetup({cache: false});
+      //var FOLDER_ID_SUMMARY="1G1aeE2hYfMv3HkRPYJy-75hfrkSzxRCm"
+      //var FOLDER_ID_FB="15aHPzBayMy9Np3FlQmeepg27O9thP2ZO"
+      //var FOLDER_ID_VOC="1d3fA-SromFYcTkX91w3QFiA-qiguaHB5"
+      //var FOLDER_ID_PRO="1PcBSeb4NGeaX_BGRove21PNrqr9csg9d"
+      var FOLDER_ID_SHEETS="1qbRSUpJlVHtoVHD2Bya3xe8kGn46Wa0Y"
+
+      // Array of API discovery doc URLs for APIs used by the quickstart
+      var DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest","https://sheets.googleapis.com/$discovery/rest?version=v4"];
+
+      // Authorization scopes required by the API; multiple scopes can be
+      // included, separated by spaces.
+      var SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets.readonly';
+
+      var authorizeButton = document.getElementById('authorize_button');
+      var signoutButton = document.getElementById('signout_button');
+      var createButton = document.getElementById('create_button');
+      var updateButton = document.getElementById('update_button');
+
+      var loader = document.getElementById('loader');
+
+      var dataToAdd=[]
+
+      var spreadsheets = []
+
+      $.ajax({
+        dataType: 'json',
+        url: "./db",
+        success: function(data) {
+          db=data;
+          console.log(db)
+        },
+        error: function(){
+            alert("json not found");
+        }
+      });
+
+      function findWithAttr(array, attr, value) {
+          for(var i = 0; i < array.length; i += 1) {
+              if(array[i][attr] === value) {
+                  return i;
+              }
+          }
+          return -1;
+      }
+
+
+      /**
+       *  On load, called to load the auth2 library and API client library.
+       */
+      function handleClientLoad() {
+        gapi.load('client:auth2', initClient);
+      }
+
+      /**
+       *  Initializes the API client library and sets up sign-in state
+       *  listeners.
+       */
+      function initClient() {
+        gapi.client.init({
+          apiKey: API_KEY,
+          clientId: CLIENT_ID,
+          discoveryDocs: DISCOVERY_DOCS,
+          scope: SCOPES
+        }).then(function () {
+          // Listen for sign-in state changes.
+          gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
+
+          // Handle the initial sign-in state.
+          updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+          authorizeButton.onclick = handleAuthClick;
+          signoutButton.onclick = handleSignoutClick;
+        });
+      }
+
+        async function uploadHtmlFile(file, folderId, student) {
+              var txt = '';
+              var xmlhttp = new XMLHttpRequest();
+              xmlhttp.onreadystatechange =  async function(){
+                if(xmlhttp.status == 200 && xmlhttp.readyState == 4){
+                  txt = xmlhttp.responseText;
+                  const boundary = '-------314159265358979323846';
+                  const delimiter = "\r\n--" + boundary + "\r\n";
+                  const close_delim = "\r\n--" + boundary + "--";
+
+                  var fileContent = txt;
+
+
+                  // Get the file 
+                  return await gapi.client.drive.files.list({
+                    'name':student.name,
+                    'q':"'"+folderId+"' in parents and name = '"+student.name+"'"
+                  }).then(function(response) {
+                    
+
+                    var files = response.result.files;
+                    if (files && files.length > 0) {
+                      console.log()
+                      var metadata = {
+                          'name': student.name,
+                          'mimeType': 'application/vnd.google-apps.document'
+                      };
+                      var multipartRequestBody = delimiter +  'Content-Type: application/json\r\n\r\n' + JSON.stringify(metadata) + delimiter + 'Content-Type: ' + 'text/html\r\n\r\n' + fileContent + close_delim;
+
+
+                        gapi.client.request({
+                            'path': '/upload/drive/v3/files/'+files[0].id,
+                            'method': 'PATCH',
+                            'params': {
+                                'uploadType': 'multipart'
+                            },
+                            'headers': {
+                                'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+                            },
+                            'body': multipartRequestBody
+                        }).then(function(response){
+                            console.log(response);
+                        });
+                    }
+                    else {
+                      var metadata = {
+                          'name': student.name,
+                          'mimeType': 'application/vnd.google-apps.document',
+                          'parents': [folderId]
+                      };
+
+                    var multipartRequestBody = delimiter +  'Content-Type: application/json\r\n\r\n' + JSON.stringify(metadata) + delimiter + 'Content-Type: ' + 'text/html\r\n\r\n' + fileContent + close_delim;
+
+
+                      gapi.client.request({
+                          'path': '/upload/drive/v3/files',
+                          'method': 'POST',
+                          'params': {
+                              'uploadType': 'multipart'
+                          },
+                          'headers': {
+                              'Content-Type': 'multipart/related; boundary="' + boundary + '"'
+                          },
+                          'body': multipartRequestBody
+                      }).then(function(response){
+                          console.log(response);
+                      });
+                    }
+                  });
+
+
+                }
+              };
+              xmlhttp.open("GET",file,true);
+              xmlhttp.send();
+        }
+
+      async function uploadAll() {
+
+          for(var i = 0; i<dataToAdd.length;i++) {
+            $.ajax({
+              type: "POST",
+              url: "./update_student",
+              contentType: 'application/json',
+              data: JSON.stringify(dataToAdd[i]),
+              success:  function(data) {
+				console.log(data)
+                //uploadHtmlFile(data.file_prefix+".html",FOLDER_ID_SUMMARY,data);
+                //uploadHtmlFile(data.file_prefix+"_feedback.html", FOLDER_ID_FB,data);
+                //uploadHtmlFile(data.file_prefix+"_voc.html",FOLDER_ID_VOC,data);
+                //uploadHtmlFile(data.file_prefix+"_pronunciation.html",FOLDER_ID_PRO,data);
+				
+			  idx = findWithAttr(db,'id',data.id)
+
+			  if (idx != -1) {
+				db[idx].row=data.row;
+			  }
+			  else {
+				db.push(data)
+			  }
+			  
+			  console.log(db)
+
+              },
+              error: function(){
+
+              }
+            });
+          }
+      
+
+    }
+
+
+      async function updateDocs() {
+
+        createButton.style.display = 'none';
+        loader.style.display = 'block';
+        console.log(dataToAdd);
+
+        uploadAll();
+
+
+		    updateButton.style.display = 'block';
+            loader.style.display = 'none';
+            var pre = document.getElementById('content');
+            pre.innerHTML="<b>PDF Updated.</b>";
+
+
+          }
+
+      /**
+       *  Called when the signed in status changes, to update the UI
+       *  appropriately. After a sign-in, the API is called.
+       */
+
+      async function checkUpdates() {
+
+          loader.style.display = 'block';
+          updateButton.style.display = 'none';
+          dataToAdd=[]
+          spreadsheets=[]
+                      var pre = document.getElementById('content');
+            pre.innerHTML="";
+          await listFiles();
+
+          appendPre("<b>The following files will be added :</b>");
+          console.log(spreadsheets.length);
+
+          for (var i=0; i < spreadsheets.length; i++) {
+            console.log("Reading " + spreadsheets[i].name)
+            await listMajors(spreadsheets[i]);
+          }
+          
+          if(dataToAdd.length==0) {
+            updateButton.style.display = 'block';
+            loader.style.display = 'none';
+            var pre = document.getElementById('content');
+            pre.innerHTML="<b>Nothing to update.</b>";
+          }
+          else {
+            createButton.style.display = 'block';
+            loader.style.display = 'none';
+          }
+      }
+
+      async function updateSigninStatus(isSignedIn) {
+        if (isSignedIn) {
+          authorizeButton.style.display = 'none';
+          signoutButton.style.display = 'block';
+            var pre = document.getElementById('content');
+            pre.innerHTML="";
+          checkUpdates()
+          
+            
+
+
+        } 
+        else {
+          authorizeButton.style.display = 'block';
+          signoutButton.style.display = 'none';
+
+        }
+      }
+
+      /**
+       *  Sign in the user upon button click.
+       */
+      function handleAuthClick(event) {
+        gapi.auth2.getAuthInstance().signIn();
+      }
+
+      /**
+       *  Sign out the user upon button click.
+       */
+      function handleSignoutClick(event) {
+        gapi.auth2.getAuthInstance().signOut();
+      }
+
+      /**
+       * Append a pre element to the body containing the given message
+       * as its text node. Used to display the results of the API call.
+       *
+       * @param {string} message Text to be placed in pre element.
+       */
+      function appendPre(message) {
+        var pre = document.getElementById('content');
+        pre.innerHTML+=message;
+      }
+
+      /**
+       * Print files.
+       */
+      async function listFiles() {
+        return await gapi.client.drive.files.list({
+          'q':"'"+FOLDER_ID_SHEETS+"' in parents"
+        }).then(function(response) {
+
+          var files = response.result.files;
+          if (files && files.length > 0) {
+            for (var i = 0; i < files.length; i++) {
+              var file = files[i];
+              console.log('here')
+              spreadsheets.push({'name':file.name,'id':file.id})
+            }
+          } else {
+            appendPre('No files found.');
+          }
+        });
+      }
+
+      /**
+       * Print the content of a student spredsheet
+       */
+      async function listMajors(student) {
+
+        html="<li>"+student.name+'<table class="TFtableCol"><tr>'
+        return await gapi.client.sheets.spreadsheets.values.get({
+          spreadsheetId: student.id,
+          range: 'A1:K',
+        }).then(function(response) {
+          
+
+          var range = response.result;
+
+          var init=1;
+
+          idx = findWithAttr(db,'id',student.id)
+
+          if (idx != -1) {
+            init=db[idx].row;
+          }
+
+          if (range.values.length > init) {
+          // Headers
+
+          for (var j=0;j<11;j++) {
+            html+="<th>"+range.values[0][j]+"</th>"
+          }
+          html+="</tr>"
+
+          date=range.values[init][0]
+          arrayData=[]
+          arrayData.unshift({'date':date,'data':[]})
+          dateIdx=0;
+
+          for (i = init; i < range.values.length; i++) {
+            
+            // Check if date have change
+            if(date!=range.values[i][0]) {
+              date=range.values[i][0]
+              // Increment idx
+              dateIdx=0
+              arrayData.unshift({'date':date,'data':[]})
+            }
+
+            temp={"focus":range.values[i][1],
+                "materials":range.values[i][2],
+                "mistake":range.values[i][3],
+                "correction":range.values[i][4],
+                "voc":range.values[i][5],
+                "pos":range.values[i][6],
+                "def":range.values[i][7],
+                "pronunciation":range.values[i][8],
+                "sound":range.values[i][9],
+                "feedback":range.values[i][10]
+            }
+
+            for (var property in temp) {
+                if (temp[property]==undefined) {
+                    temp[property]="/"
+                }
+            }
+
+
+
+            arrayData[dateIdx].data.unshift(temp)
+
+            html+="<tr>"
+            for (var j=0;j<11;j++) {
+              html+="<td>"+range.values[i][j]+"</td>"
+            }
+            // Print columns A and E, which correspond to indices 0 and 4.
+            html+="</tr>"
+          }
+
+          dataToAdd.push({'id':student.id,'name':student.name,'data':arrayData,'new_entries':range.values.length-init})
+          html+="</table></li>"
+          appendPre(html);
+
+          } else {
+            //appendPre('No data found.');
+          }
+        }, function(response) {
+          appendPre('Error: ' + response.result.error.message);
+        });
+      }
+
+    </script>
+
+    <script async defer src="https://apis.google.com/js/api.js"
+      onload="this.onload=function(){};handleClientLoad()"
+      onreadystatechange="if (this.readyState === 'complete') this.onload()">
+    </script>
+  </body>
+</html>
